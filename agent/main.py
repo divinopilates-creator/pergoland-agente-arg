@@ -94,50 +94,51 @@ async def webhook_verificacion(request: Request):
     return PlainTextResponse(str(resultado))
 
 
+# Cache global para deduplicar webhooks
+_mensajes_procesados: set = set()
+
 @app.post("/webhook")
 async def webhook_handler(request: Request):
     try:
         mensajes = await proveedor.parsear_webhook(request)
-
         for msg in mensajes:
+            # ── Deduplicar webhooks repetidos de Whapi ──────
+            if hasattr(msg, 'id') and msg.id:
+                if msg.id in _mensajes_procesados:
+                    continue
+                _mensajes_procesados.add(msg.id)
+                if len(_mensajes_procesados) > 1000:
+                    _mensajes_procesados.clear()
+
             if not msg.texto:
                 continue
-
             texto = msg.texto.strip()
-
             # 1. Detectar "stop matias" desde cualquier numero
             if await es_comando_stop(texto):
                 await pausar_contacto(msg.telefono)
                 logger.info(f"Handoff activado para {msg.telefono} - Matias pausado")
                 continue
-
             # 2. Detectar "start matias" para reanudar manualmente
             if await es_comando_start(texto):
                 await reanudar_contacto(msg.telefono)
                 logger.info(f"Matías reanudado manualmente para {msg.telefono}")
                 continue
-
             # 3. Ignorar mensajes propios que no son stop matias
             if msg.es_propio:
                 continue
-
             # 4. Si esta pausado - no responder (Gabriel esta atendiendo)
             if await esta_pausado(msg.telefono):
                 logger.info(f"Mensaje de {msg.telefono} ignorado - Matias pausado (Gabriel atendiendo)")
                 continue
-
             # 5. Flujo normal - Matias responde
             logger.info(f"Mensaje de {msg.telefono}: {texto}")
-
             historial = await obtener_historial(msg.telefono)
             respuesta = await generar_respuesta(texto, historial)
             await guardar_mensaje(msg.telefono, "user", texto)
             await guardar_mensaje(msg.telefono, "assistant", respuesta)
             await proveedor.enviar_mensaje(msg.telefono, respuesta)
-
             historial_actualizado = await obtener_historial(msg.telefono)
-
-            # 5. Verificar si es lead calificado (solo si tiene el tag LEAD)
+            # 6. Verificar si es lead calificado
             if tiene_tag_lead(historial_actualizado):
                 await enviar_lead_crm(
                     msg.telefono,
@@ -147,17 +148,13 @@ async def webhook_handler(request: Request):
             elif extraer_datos_tag_madera(historial_actualizado):
                 await enviar_lead_distribuidor_crm(msg.telefono, historial_actualizado)
             else:
-                # 6. Guardar contacto incompleto para remarketing
                 await enviar_contacto_incompleto_crm(
                     msg.telefono,
                     msg.nombre if hasattr(msg, "nombre") else "",
                     historial_actualizado
                 )
-
             logger.info(f"Respuesta a {msg.telefono}: {respuesta}")
-
         return {"status": "ok"}
-
     except Exception as e:
         logger.error(f"Error en webhook: {e}")
         raise HTTPException(status_code=500, detail=str(e))
