@@ -103,13 +103,12 @@ async def webhook_handler(request: Request):
         mensajes = await proveedor.parsear_webhook(request)
         for msg in mensajes:
             # ── Deduplicar webhooks repetidos de Whapi ──────
-            if hasattr(msg, 'id') and msg.id:
-                if msg.id in _mensajes_procesados:
-                    continue
-                _mensajes_procesados.add(msg.id)
-                if len(_mensajes_procesados) > 1000:
-                    _mensajes_procesados.clear()
-
+if msg.mensaje_id:
+    if msg.mensaje_id in _mensajes_procesados:
+        continue
+    _mensajes_procesados.add(msg.mensaje_id)
+    if len(_mensajes_procesados) > 1000:
+        _mensajes_procesados.clear()
             if not msg.texto:
                 continue
             texto = msg.texto.strip()
