@@ -101,14 +101,10 @@ async def es_comando_start(texto: str) -> bool:
 
 # ── Scheduler de recordatorios ────────────────────────────────
 async def scheduler_recordatorios(proveedor):
-    """
-    Corre en background. Cada 5 minutos revisa si hay recordatorios pendientes.
-    Envía el de 24hs y el de 72hs cuando corresponde.
-    """
     logger.info("Scheduler de recordatorios iniciado")
     while True:
         try:
-            await asyncio.sleep(300)  # revisar cada 5 minutos
+            await asyncio.sleep(300)  # cada 5 minutos
             ahora = datetime.utcnow()
 
             async with async_session() as session:
@@ -118,7 +114,7 @@ async def scheduler_recordatorios(proveedor):
                 for estado in estados:
                     tiempo_pausado = ahora - estado.pausado_en
 
-                    # Recordatorio 24hs
+                    # Recordatorio 24hs — solo si no fue enviado aun
                     if (tiempo_pausado >= timedelta(hours=24) and
                             estado.recordatorio_24h == "pendiente"):
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_24H)
@@ -127,14 +123,16 @@ async def scheduler_recordatorios(proveedor):
                             await session.commit()
                             logger.info(f"Recordatorio 24hs enviado a {estado.telefono}")
 
-                    # Recordatorio 72hs
-                    if (tiempo_pausado >= timedelta(hours=72) and
+                    # Recordatorio 72hs — solo si el de 24hs ya fue enviado
+                    # y el de 72hs aun no fue enviado
+                    elif (tiempo_pausado >= timedelta(hours=72) and
+                            estado.recordatorio_24h == "enviado" and
                             estado.recordatorio_72h == "pendiente"):
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_72H)
                         if ok:
                             estado.recordatorio_72h = "enviado"
                             await session.commit()
-                            logger.info(f"Recordatorio 72hs enviado a {estado.telefono}")
+                            logger.info(f"Recordatorio 72hs enviado a {estado.telefono} - ultimo seguimiento")
 
         except Exception as e:
             logger.error(f"Error en scheduler recordatorios: {e}")
