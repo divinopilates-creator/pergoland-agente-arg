@@ -40,12 +40,10 @@ class HandoffEstado(Base):
 
 
 async def inicializar_handoff_db():
-    """DROP y recrear tabla handoff_estado con esquema nuevo."""
+    """Crea la tabla handoff_estado si no existe."""
     async with engine.begin() as conn:
-        await conn.execute(text("DROP TABLE IF EXISTS handoff_estado"))
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Tabla handoff_estado recreada con esquema nuevo")
-
+    logger.info("Tabla handoff_estado inicializada")
 
 async def pausar_contacto(telefono: str):
     """Pausa a Matías SIN activar timer. El timer se activa desde el CRM."""
