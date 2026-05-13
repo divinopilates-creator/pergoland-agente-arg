@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from sqlalchemy import String, DateTime, Integer, select, delete
+from sqlalchemy import String, DateTime, Integer, select, delete, text
 from sqlalchemy.orm import Mapped, mapped_column
 from agent.memory import Base, engine, async_session
 
@@ -25,12 +25,6 @@ MSG_VISITA = (
     "¡Cualquier duda estamos aquí! 🙌"
 )
 
-MSG_STOP = (
-    "Hola 👋 Soy Matías de Pergoland Chile. "
-    "Quería saber si tenés alguna consulta sobre tu proyecto. "
-    "¡Estamos para ayudarte! 😊"
-)
-
 
 # ── Modelo de base de datos ───────────────────────────────────
 class HandoffEstado(Base):
@@ -40,22 +34,21 @@ class HandoffEstado(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telefono: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     pausado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    tipo_timer: Mapped[str] = mapped_column(String(20), default="stop")  # stop / cotizacion / visita
+    tipo_timer: Mapped[str] = mapped_column(String(20), default="stop")
     timer_activado_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    recordatorio_enviado: Mapped[str] = mapped_column(String(10), default="pendiente")  # pendiente / enviado
+    recordatorio_enviado: Mapped[str] = mapped_column(String(10), default="pendiente")
 
 
 async def inicializar_handoff_db():
-    """Crea la tabla handoff_estado si no existe."""
+    """DROP y recrear tabla handoff_estado con esquema nuevo."""
     async with engine.begin() as conn:
+        await conn.execute(text("DROP TABLE IF EXISTS handoff_estado"))
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("Tabla handoff_estado recreada con esquema nuevo")
 
 
 async def pausar_contacto(telefono: str):
-    """
-    Pausa a Matías para un contacto — SIN activar timer.
-    El timer se activa desde el CRM al cambiar etapa.
-    """
+    """Pausa a Matías SIN activar timer. El timer se activa desde el CRM."""
     async with async_session() as session:
         result = await session.execute(
             select(HandoffEstado).where(HandoffEstado.telefono == telefono)
@@ -80,10 +73,7 @@ async def pausar_contacto(telefono: str):
 
 
 async def activar_timer(telefono: str, tipo: str):
-    """
-    Activa el timer para un contacto desde el CRM.
-    tipo: 'cotizacion' (24hs) o 'visita' (72hs)
-    """
+    """Activa timer desde el CRM. tipo: 'cotizacion' (24hs) o 'visita' (72hs)."""
     async with async_session() as session:
         result = await session.execute(
             select(HandoffEstado).where(HandoffEstado.telefono == telefono)
@@ -95,7 +85,6 @@ async def activar_timer(telefono: str, tipo: str):
             existente.timer_activado_en = datetime.utcnow()
             existente.recordatorio_enviado = "pendiente"
         else:
-            # Crear registro si no existe (pausar + activar timer de una)
             session.add(HandoffEstado(
                 telefono=telefono,
                 pausado_en=datetime.utcnow(),
@@ -158,33 +147,30 @@ async def scheduler_recordatorios(proveedor):
                 estados = result.scalars().all()
 
                 for estado in estados:
-                    # Solo procesar si el timer fue activado desde el CRM
                     if not estado.timer_activado_en:
                         continue
-
-                    # Solo si el recordatorio no fue enviado aún
                     if estado.recordatorio_enviado != "pendiente":
                         continue
 
                     tiempo_desde_timer = ahora - estado.timer_activado_en
 
-                    # Cotización → 24hs
+                    # Cotización → 24hs → 1 solo mensaje → pausa definitiva
                     if (estado.tipo_timer == "cotizacion" and
                             tiempo_desde_timer >= timedelta(hours=24)):
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_COTIZACION)
                         if ok:
                             estado.recordatorio_enviado = "enviado"
-                            estado.timer_activado_en = None  # desactivar timer
+                            estado.timer_activado_en = None
                             await session.commit()
                             logger.info(f"Recordatorio cotización enviado a {estado.telefono} — pausa definitiva")
 
-                    # Visita → 72hs
+                    # Visita → 72hs → 1 solo mensaje → pausa definitiva
                     elif (estado.tipo_timer == "visita" and
                             tiempo_desde_timer >= timedelta(hours=72)):
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_VISITA)
                         if ok:
                             estado.recordatorio_enviado = "enviado"
-                            estado.timer_activado_en = None  # desactivar timer
+                            estado.timer_activado_en = None
                             await session.commit()
                             logger.info(f"Recordatorio visita enviado a {estado.telefono} — pausa definitiva")
 
