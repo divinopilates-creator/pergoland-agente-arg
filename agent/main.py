@@ -1,4 +1,4 @@
-# agent/main.py - AgentKit Pergoland Chile con handoff humano
+# agent/main.py - AgentKit Pergoland Argentina con handoff humano
 import os
 import asyncio
 import logging
@@ -33,9 +33,9 @@ proveedor = obtener_proveedor()
 def es_lead_calificado(historial: list) -> bool:
     conversacion = " ".join([m["content"].lower() for m in historial])
     tiene_medidas = any(x in conversacion for x in ["x", "metro", "m2", "largo", "ancho", "medida"])
-    tiene_comuna = any(x in conversacion for x in ["comuna", "santiago", "providencia", "las condes", "vitacura", "nunoa", "maipu", "rancagua", "valparaiso", "vina"])
-    tiene_tipo = any(x in conversacion for x in ["terraza", "estacionamiento", "quincho", "piscina", "cochera"])
-    return tiene_medidas and tiene_comuna and tiene_tipo
+    tiene_zona = any(x in conversacion for x in ["caba", "palermo", "belgrano", "recoleta", "san isidro", "tigre", "pilar", "nordelta", "zona norte", "zona sur", "zona oeste", "gba", "la plata", "quilmes", "lomas"])
+    tiene_tipo = any(x in conversacion for x in ["terraza", "cochera", "quincho", "piscina", "estacionamiento", "galeria"])
+    return tiene_medidas and tiene_zona and tiene_tipo
 
 
 def tiene_tag_lead(historial: list) -> bool:
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AgentKit - Matias de PERGOLAND CHILE SPA",
+    title="AgentKit - Gian de PERGOLAND ARGENTINA",
     version="1.3.0",
     lifespan=lifespan
 )
@@ -74,7 +74,7 @@ app = FastAPI(
 
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "service": "agentkit", "agente": "Matias", "negocio": "PERGOLAND CHILE SPA"}
+    return {"status": "ok", "service": "agentkit", "agente": "Gian", "negocio": "PERGOLAND ARGENTINA"}
 
 
 @app.get("/conversations/{telefono}")
@@ -87,7 +87,7 @@ async def get_conversation(telefono: str):
 async def activar_handoff(request: Request):
     """
     Recibe trigger del CRM cuando cambia etapa.
-    Body: { "telefono": "56912345678", "tipo": "cotizacion" | "visita" }
+    Body: { "telefono": "5491136647000", "tipo": "cotizacion" | "visita" }
     """
     try:
         body = await request.json()
@@ -132,16 +132,16 @@ async def webhook_handler(request: Request):
 
             texto = msg.texto.strip()
 
-            # 1. Detectar "stop matias"
+            # 1. Detectar "stop gian"
             if await es_comando_stop(texto):
                 await pausar_contacto(msg.telefono)
-                logger.info(f"Handoff activado para {msg.telefono} - Matias pausado")
+                logger.info(f"Handoff activado para {msg.telefono} - Gian pausado")
                 continue
 
-            # 2. Detectar "start matias"
+            # 2. Detectar "start gian"
             if await es_comando_start(texto):
                 await reanudar_contacto(msg.telefono)
-                logger.info(f"Matías reanudado manualmente para {msg.telefono}")
+                logger.info(f"Gian reanudado manualmente para {msg.telefono}")
                 continue
 
             # 3. Ignorar mensajes propios
@@ -150,7 +150,7 @@ async def webhook_handler(request: Request):
 
             # 4. Si está pausado — no responder
             if await esta_pausado(msg.telefono):
-                logger.info(f"Mensaje de {msg.telefono} ignorado - Matias pausado")
+                logger.info(f"Mensaje de {msg.telefono} ignorado - Gian pausado")
                 continue
 
             # 5. Flujo normal
