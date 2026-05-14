@@ -1,5 +1,5 @@
 # agent/handoff.py - Handoff humano y recordatorios automáticos
-# Timer se activa desde el CRM al cambiar etapa, NO desde stop matias
+# Timer se activa desde el CRM al cambiar etapa, NO desde stop gian
 
 import asyncio
 import logging
@@ -10,23 +10,23 @@ from agent.memory import Base, engine, async_session
 
 logger = logging.getLogger("agentkit")
 
-# ── Mensajes automáticos ──────────────────────────────────────
+# ── Mensajes automáticos ──────────────────────────────────────────────
 MSG_COTIZACION = (
-    "Hola 👋 Soy Matías de Pergoland Chile. "
+    "Hola 👋 Soy Gian de Pergoland Argentina. "
     "Quería saber si pudiste revisar la cotización que te enviamos "
-    "y si tienes alguna consulta sobre tu proyecto. "
+    "y si tenés alguna consulta sobre tu proyecto. "
     "¡Estamos para ayudarte! 😊"
 )
 
 MSG_VISITA = (
-    "Hola 👋 Matías de Pergoland Chile. "
+    "Hola 👋 Gian de Pergoland Argentina. "
     "Quería hacer un seguimiento post visita técnica. "
-    "¿Pudiste revisar la propuesta con Gabriel? "
-    "¡Cualquier duda estamos aquí! 🙌"
+    "¿Pudiste revisar la propuesta con Martín? "
+    "¡Cualquier duda estamos acá! 🙌"
 )
 
 
-# ── Modelo de base de datos ───────────────────────────────────
+# ── Modelo de base de datos ───────────────────────────────────────────
 class HandoffEstado(Base):
     """Estado de pausa y timer por contacto."""
     __tablename__ = "handoff_estado"
@@ -46,7 +46,7 @@ async def inicializar_handoff_db():
     logger.info("Tabla handoff_estado inicializada")
 
 async def pausar_contacto(telefono: str):
-    """Pausa a Matías SIN activar timer. El timer se activa desde el CRM."""
+    """Pausa a Gian SIN activar timer. El timer se activa desde el CRM."""
     async with async_session() as session:
         result = await session.execute(
             select(HandoffEstado).where(HandoffEstado.telefono == telefono)
@@ -67,7 +67,7 @@ async def pausar_contacto(telefono: str):
                 recordatorio_enviado="pendiente",
             ))
         await session.commit()
-    logger.info(f"Matías pausado para {telefono} — esperando trigger de CRM")
+    logger.info(f"Gian pausado para {telefono} — esperando trigger de CRM")
 
 
 async def activar_timer(telefono: str, tipo: str):
@@ -95,17 +95,17 @@ async def activar_timer(telefono: str, tipo: str):
 
 
 async def reanudar_contacto(telefono: str):
-    """Reanuda a Matías — cancela pausa y timers."""
+    """Reanuda a Gian — cancela pausa y timers."""
     async with async_session() as session:
         await session.execute(
             delete(HandoffEstado).where(HandoffEstado.telefono == telefono)
         )
         await session.commit()
-    logger.info(f"Matías reanudado para {telefono}")
+    logger.info(f"Gian reanudado para {telefono}")
 
 
 async def esta_pausado(telefono: str) -> bool:
-    """Verifica si Matías está pausado para un contacto."""
+    """Verifica si Gian está pausado para un contacto."""
     async with async_session() as session:
         result = await session.execute(
             select(HandoffEstado).where(HandoffEstado.telefono == telefono)
@@ -115,19 +115,20 @@ async def esta_pausado(telefono: str) -> bool:
 
 async def es_comando_stop(texto: str) -> bool:
     texto_lower = texto.strip().lower()
-    return texto_lower in ["stop matias", "stop matías", "parar matias", "parar matías"]
+    return texto_lower in ["stop gian", "parar gian", "pausar gian"]
 
 
 async def es_comando_start(texto: str) -> bool:
     texto_lower = texto.strip().lower()
     return any(cmd in texto_lower for cmd in [
-        "start matias", "start matías",
-        "iniciar matias", "activar matias",
+        "start gian",
+        "iniciar gian",
+        "activar gian",
         "start"
     ])
 
 
-# ── Scheduler de recordatorios ────────────────────────────────
+# ── Scheduler de recordatorios ────────────────────────────────────────
 async def scheduler_recordatorios(proveedor):
     """
     Revisa cada 5 minutos si hay recordatorios pendientes.
