@@ -1,10 +1,13 @@
-﻿import os
+import os
 import logging
 import httpx
 from fastapi import Request
 from agent.providers.base import ProveedorWhatsApp, MensajeEntrante
 
 logger = logging.getLogger("agentkit")
+
+# Tipos de archivo que se interpretan como respuesta al pedido de material
+TIPOS_ARCHIVO = {"image", "video", "document", "audio", "sticker", "ptt"}
 
 class ProveedorWhapi(ProveedorWhatsApp):
     """Proveedor de WhatsApp usando Whapi.cloud."""
@@ -18,19 +21,35 @@ class ProveedorWhapi(ProveedorWhatsApp):
         mensajes = []
         if "messages" not in body:
             return mensajes
+
         for msg in body.get("messages", []):
-            if msg.get("type") != "text":
-                continue
-            texto = msg.get("text", {}).get("body", "")
-            if not texto:
-                continue
-            mensajes.append(MensajeEntrante(
-                telefono=msg.get("chat_id", ""),
-                texto=texto,
-                mensaje_id=msg.get("id", ""),
-                es_propio=msg.get("from_me", False),
-                nombre=msg.get("from_name", ""),
-            ))
+            tipo = msg.get("type", "")
+
+            # Mensajes de texto — flujo normal
+            if tipo == "text":
+                texto = msg.get("text", {}).get("body", "")
+                if not texto:
+                    continue
+                mensajes.append(MensajeEntrante(
+                    telefono=msg.get("chat_id", ""),
+                    texto=texto,
+                    mensaje_id=msg.get("id", ""),
+                    es_propio=msg.get("from_me", False),
+                    nombre=msg.get("from_name", ""),
+                ))
+
+            # Archivos (foto, video, audio, documento, plano) —
+            # se tratan como respuesta al pedido de material, Gian sigue el flujo
+            elif tipo in TIPOS_ARCHIVO and not msg.get("from_me", False):
+                logger.info(f"Archivo recibido tipo={tipo} de {msg.get('chat_id', '')} — tratado como respuesta de material")
+                mensajes.append(MensajeEntrante(
+                    telefono=msg.get("chat_id", ""),
+                    texto="[ARCHIVO_RECIBIDO]",
+                    mensaje_id=msg.get("id", ""),
+                    es_propio=False,
+                    nombre=msg.get("from_name", ""),
+                ))
+
         return mensajes
 
     async def validar_webhook(self, request: Request):
