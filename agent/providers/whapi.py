@@ -63,7 +63,7 @@ class ProveedorWhapi(ProveedorWhatsApp):
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(
                 self.url_envio,
                 json={"to": telefono, "body": mensaje},
