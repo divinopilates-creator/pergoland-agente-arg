@@ -1,4 +1,4 @@
-# agent/main.py - AgentKit Pergoland Argentina con handoff humano
+# agent/main.py - AgentKit Pergoland Chile con handoff humano
 import os
 import asyncio
 import logging
@@ -29,13 +29,16 @@ logger = logging.getLogger("agentkit")
 
 proveedor = obtener_proveedor()
 
+# Cache de mensajes procesados para evitar duplicados de Whapi
+mensajes_procesados: set[str] = set()
+
 
 def es_lead_calificado(historial: list) -> bool:
     conversacion = " ".join([m["content"].lower() for m in historial])
     tiene_medidas = any(x in conversacion for x in ["x", "metro", "m2", "largo", "ancho", "medida"])
-    tiene_zona = any(x in conversacion for x in ["caba", "palermo", "belgrano", "recoleta", "san isidro", "tigre", "pilar", "nordelta", "zona norte", "zona sur", "zona oeste", "gba", "la plata", "quilmes", "lomas"])
-    tiene_tipo = any(x in conversacion for x in ["terraza", "cochera", "quincho", "piscina", "estacionamiento", "galeria"])
-    return tiene_medidas and tiene_zona and tiene_tipo
+    tiene_comuna = any(x in conversacion for x in ["comuna", "santiago", "providencia", "las condes", "vitacura", "nunoa", "maipu", "rancagua", "valparaiso", "vina"])
+    tiene_tipo = any(x in conversacion for x in ["terraza", "estacionamiento", "quincho", "piscina", "cochera"])
+    return tiene_medidas and tiene_comuna and tiene_tipo
 
 
 def tiene_tag_lead(historial: list) -> bool:
@@ -66,15 +69,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AgentKit - Gian de PERGOLAND ARGENTINA",
-    version="1.3.0",
+    title="AgentKit - Matias de PERGOLAND CHILE SPA",
+    version="1.4.0",
     lifespan=lifespan
 )
 
 
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "service": "agentkit", "agente": "Gian", "negocio": "PERGOLAND ARGENTINA"}
+    return {"status": "ok", "service": "agentkit", "agente": "Matias", "negocio": "PERGOLAND CHILE SPA"}
 
 
 @app.get("/conversations/{telefono}")
@@ -85,10 +88,6 @@ async def get_conversation(telefono: str):
 
 @app.post("/handoff/activar")
 async def activar_handoff(request: Request):
-    """
-    Recibe trigger del CRM cuando cambia etapa.
-    Body: { "telefono": "5491136647000", "tipo": "cotizacion" | "visita" }
-    """
     try:
         body = await request.json()
         telefono = body.get("telefono", "").strip()
@@ -97,7 +96,6 @@ async def activar_handoff(request: Request):
         if not telefono or tipo not in ("cotizacion", "visita"):
             return {"status": "error", "message": "telefono y tipo (cotizacion/visita) requeridos"}
 
-        # Normalizar teléfono
         if not telefono.endswith("@s.whatsapp.net"):
             telefono = f"{telefono}@s.whatsapp.net"
 
@@ -132,16 +130,23 @@ async def webhook_handler(request: Request):
 
             texto = msg.texto.strip()
 
-            # 1. Detectar "stop gian"
+            # Ignorar mensajes duplicados (Whapi envía el mismo webhook varias veces)
+            if msg.mensaje_id and msg.mensaje_id in mensajes_procesados:
+                logger.info(f"Mensaje duplicado ignorado: {msg.mensaje_id}")
+                continue
+            if msg.mensaje_id:
+                mensajes_procesados.add(msg.mensaje_id)
+
+            # 1. Detectar "stop matias"
             if await es_comando_stop(texto):
                 await pausar_contacto(msg.telefono)
-                logger.info(f"Handoff activado para {msg.telefono} - Gian pausado")
+                logger.info(f"Handoff activado para {msg.telefono} - Matias pausado")
                 continue
 
-            # 2. Detectar "start gian"
+            # 2. Detectar "start matias"
             if await es_comando_start(texto):
                 await reanudar_contacto(msg.telefono)
-                logger.info(f"Gian reanudado manualmente para {msg.telefono}")
+                logger.info(f"Matías reanudado manualmente para {msg.telefono}")
                 continue
 
             # 3. Ignorar mensajes propios
@@ -150,7 +155,7 @@ async def webhook_handler(request: Request):
 
             # 4. Si está pausado — no responder
             if await esta_pausado(msg.telefono):
-                logger.info(f"Mensaje de {msg.telefono} ignorado - Gian pausado")
+                logger.info(f"Mensaje de {msg.telefono} ignorado - Matias pausado")
                 continue
 
             # 5. Flujo normal
