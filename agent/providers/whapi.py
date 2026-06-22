@@ -9,6 +9,7 @@ logger = logging.getLogger("agentkit")
 # Tipos de archivo que se interpretan como respuesta al pedido de material
 TIPOS_ARCHIVO = {"image", "video", "document", "audio", "sticker", "ptt"}
 
+
 class ProveedorWhapi(ProveedorWhatsApp):
     """Proveedor de WhatsApp usando Whapi.cloud."""
 
@@ -19,13 +20,15 @@ class ProveedorWhapi(ProveedorWhatsApp):
     async def parsear_webhook(self, request: Request) -> list[MensajeEntrante]:
         body = await request.json()
         mensajes = []
+
         if "messages" not in body:
             return mensajes
 
         for msg in body.get("messages", []):
             tipo = msg.get("type", "")
+            es_propio = msg.get("from_me", False)
 
-            # Mensajes de texto — flujo normal
+            # Mensajes de texto — flujo normal (incluye los de Martín, es_propio=True)
             if tipo == "text":
                 texto = msg.get("text", {}).get("body", "")
                 if not texto:
@@ -34,19 +37,23 @@ class ProveedorWhapi(ProveedorWhatsApp):
                     telefono=msg.get("chat_id", ""),
                     texto=texto,
                     mensaje_id=msg.get("id", ""),
-                    es_propio=msg.get("from_me", False),
+                    es_propio=es_propio,
                     nombre=msg.get("from_name", ""),
                 ))
 
-            # Archivos (foto, video, audio, documento, plano) —
-            # se tratan como respuesta al pedido de material, Gian sigue el flujo
-            elif tipo in TIPOS_ARCHIVO and not msg.get("from_me", False):
-                logger.info(f"Archivo recibido tipo={tipo} de {msg.get('chat_id', '')} — tratado como respuesta de material")
+            # Archivos (foto, video, audio, documento, plano)
+            # Si lo manda el cliente (es_propio=False): se trata como respuesta de material, Gian sigue el flujo.
+            # Si lo manda Martín (es_propio=True): se registra como intervención humana, no se descarta.
+            elif tipo in TIPOS_ARCHIVO:
+                if es_propio:
+                    logger.info(f"Archivo enviado por Martín tipo={tipo} a {msg.get('chat_id', '')} — registrado como intervención humana")
+                else:
+                    logger.info(f"Archivo recibido tipo={tipo} de {msg.get('chat_id', '')} — tratado como respuesta de material")
                 mensajes.append(MensajeEntrante(
                     telefono=msg.get("chat_id", ""),
-                    texto="[ARCHIVO_RECIBIDO]",
+                    texto="" if es_propio else "[ARCHIVO_RECIBIDO]",
                     mensaje_id=msg.get("id", ""),
-                    es_propio=False,
+                    es_propio=es_propio,
                     nombre=msg.get("from_name", ""),
                 ))
 
@@ -59,11 +66,13 @@ class ProveedorWhapi(ProveedorWhatsApp):
         if not self.token:
             logger.warning("WHAPI_TOKEN no configurado")
             return False
+
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
+
+        async with httpx.AsyncClient() as client:
             r = await client.post(
                 self.url_envio,
                 json={"to": telefono, "body": mensaje},

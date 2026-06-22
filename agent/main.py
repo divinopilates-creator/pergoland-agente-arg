@@ -1,4 +1,4 @@
-# agent/main.py - AgentKit Pergoland Chile con handoff humano
+# agent/main.py - AgentKit Pergoland Argentina con handoff humano
 import os
 import asyncio
 import logging
@@ -69,15 +69,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AgentKit - Matias de PERGOLAND CHILE SPA",
-    version="1.4.0",
+    title="AgentKit - Gian de PERGOLAND ARGENTINA",
+    version="1.5.0",
     lifespan=lifespan
 )
 
 
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "service": "agentkit", "agente": "Matias", "negocio": "PERGOLAND CHILE SPA"}
+    return {"status": "ok", "service": "agentkit", "agente": "Gian", "negocio": "PERGOLAND ARGENTINA"}
 
 
 @app.get("/conversations/{telefono}")
@@ -125,11 +125,6 @@ async def webhook_handler(request: Request):
         mensajes = await proveedor.parsear_webhook(request)
 
         for msg in mensajes:
-            if not msg.texto:
-                continue
-
-            texto = msg.texto.strip()
-
             # Ignorar mensajes duplicados (Whapi envía el mismo webhook varias veces)
             if msg.mensaje_id and msg.mensaje_id in mensajes_procesados:
                 logger.info(f"Mensaje duplicado ignorado: {msg.mensaje_id}")
@@ -137,25 +132,47 @@ async def webhook_handler(request: Request):
             if msg.mensaje_id:
                 mensajes_procesados.add(msg.mensaje_id)
 
-            # 1. Detectar "stop matias"
+            # 1. Mensajes propios (Martín escribiendo manualmente desde Whapi)
+            #    Se registran como intervención humana en el historial — Gian sigue activo,
+            #    pero ya no va a repreguntar datos que Martín ya resolvió manualmente.
+            if msg.es_propio:
+                texto_martin = msg.texto.strip() if msg.texto else ""
+
+                # "stop gian" / "start gian" escritos por Martín siguen funcionando igual
+                if texto_martin and await es_comando_stop(texto_martin):
+                    await pausar_contacto(msg.telefono)
+                    logger.info(f"Handoff activado para {msg.telefono} - Gian pausado (orden de Martín)")
+                    continue
+                if texto_martin and await es_comando_start(texto_martin):
+                    await reanudar_contacto(msg.telefono)
+                    logger.info(f"Gian reanudado para {msg.telefono} (orden de Martín)")
+                    continue
+
+                contenido_log = texto_martin if texto_martin else "Se envió un archivo"
+                await guardar_mensaje(msg.telefono, "assistant", f"[INTERVENCION_HUMANA] {contenido_log}")
+                logger.info(f"Intervención humana registrada para {msg.telefono}: {contenido_log}")
+                continue
+
+            if not msg.texto:
+                continue
+
+            texto = msg.texto.strip()
+
+            # 2. Detectar "stop gian" (del cliente, caso raro pero por si acaso)
             if await es_comando_stop(texto):
                 await pausar_contacto(msg.telefono)
-                logger.info(f"Handoff activado para {msg.telefono} - Matias pausado")
+                logger.info(f"Handoff activado para {msg.telefono} - Gian pausado")
                 continue
 
-            # 2. Detectar "start matias"
+            # 3. Detectar "start gian"
             if await es_comando_start(texto):
                 await reanudar_contacto(msg.telefono)
-                logger.info(f"Matías reanudado manualmente para {msg.telefono}")
-                continue
-
-            # 3. Ignorar mensajes propios
-            if msg.es_propio:
+                logger.info(f"Gian reanudado manualmente para {msg.telefono}")
                 continue
 
             # 4. Si está pausado — no responder
             if await esta_pausado(msg.telefono):
-                logger.info(f"Mensaje de {msg.telefono} ignorado - Matias pausado")
+                logger.info(f"Mensaje de {msg.telefono} ignorado - Gian pausado")
                 continue
 
             # 5. Flujo normal

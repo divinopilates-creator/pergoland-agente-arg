@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from sqlalchemy import String, DateTime, Integer, select, delete, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -10,7 +11,7 @@ from agent.memory import Base, engine, async_session
 
 logger = logging.getLogger("agentkit")
 
-# ── Mensajes automáticos ──────────────────────────────────────────────
+# ── Mensajes automáticos ────────────────────────────────────────────
 MSG_COTIZACION = (
     "Hola 👋 Soy Gian de Pergoland Argentina. "
     "Quería saber si pudiste revisar la cotización que te enviamos "
@@ -26,7 +27,7 @@ MSG_VISITA = (
 )
 
 
-# ── Modelo de base de datos ───────────────────────────────────────────
+# ── Modelo de base de datos ──────────────────────────────────────────
 class HandoffEstado(Base):
     """Estado de pausa y timer por contacto."""
     __tablename__ = "handoff_estado"
@@ -113,19 +114,48 @@ async def esta_pausado(telefono: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
+def _normalizar(texto: str) -> str:
+    """Quita puntuación, emojis y espacios repetidos; deja minúsculas."""
+    t = texto.strip().lower()
+    t = re.sub(r"[^\w\s]", "", t, flags=re.UNICODE)  # quita signos de puntuación/emojis
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 async def es_comando_stop(texto: str) -> bool:
-    texto_lower = texto.strip().lower()
-    return texto_lower in ["stop gian", "parar gian", "pausar gian"]
+    """
+    Reconoce 'stop gian' aunque venga con mayúsculas, espacios extra o puntuación.
+    Ej: "Stop gian", "stop  gian.", "Stop Gian!" -> True
+    No matchea si 'stop' o 'gian' aparecen como parte de una frase larga no relacionada,
+    para evitar falsos positivos.
+    """
+    t = _normalizar(texto)
+    comandos = {"stop gian", "parar gian", "pausar gian"}
+    if t in comandos:
+        return True
+    # Tolera 1-2 palabras extra alrededor (ej. "porfa stop gian", "stop gian por favor")
+    palabras = t.split()
+    if len(palabras) <= 5:
+        for cmd in comandos:
+            if cmd in t:
+                return True
+    return False
 
 
 async def es_comando_start(texto: str) -> bool:
-    texto_lower = texto.strip().lower()
-    return any(cmd in texto_lower for cmd in [
-        "start gian",
-        "iniciar gian",
-        "activar gian",
-        "start"
-    ])
+    """
+    Reconoce 'start gian' aunque venga con mayúsculas, espacios extra o puntuación.
+    """
+    t = _normalizar(texto)
+    comandos = {"start gian", "iniciar gian", "activar gian", "start"}
+    if t in comandos:
+        return True
+    palabras = t.split()
+    if len(palabras) <= 5:
+        for cmd in comandos:
+            if cmd in t:
+                return True
+    return False
 
 
 # ── Scheduler de recordatorios ────────────────────────────────────────
