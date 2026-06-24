@@ -132,9 +132,13 @@ async def webhook_handler(request: Request):
             if msg.mensaje_id:
                 mensajes_procesados.add(msg.mensaje_id)
 
-            # 1. Mensajes propios (Martín escribiendo manualmente desde Whapi)
-            #    Se registran como intervención humana en el historial — Gian sigue activo,
-            #    pero ya no va a repreguntar datos que Martín ya resolvió manualmente.
+            # 1. Mensajes propios (from_me=True) — pueden ser:
+            #    a) Eco del propio mensaje que Gian acaba de enviar (Whapi lo reenvía
+            #       como webhook). Hay que ignorarlo sin pausar nada.
+            #    b) Martín escribiendo manualmente o enviando un archivo. En ese caso
+            #       se registra como intervención humana Y se pausa a Gian
+            #       automáticamente (igual que "stop gian"). Gian solo vuelve a
+            #       responder si alguien manda "start gian" explícitamente.
             if msg.es_propio:
                 texto_martin = msg.texto.strip() if msg.texto else ""
 
@@ -148,9 +152,26 @@ async def webhook_handler(request: Request):
                     logger.info(f"Gian reanudado para {msg.telefono} (orden de Martín)")
                     continue
 
+                # Detectar si es el eco del propio bot: comparamos contra la última
+                # respuesta que Gian generó y guardó para este contacto.
+                historial_previo = await obtener_historial(msg.telefono, limite=5)
+                ultima_respuesta_bot = ""
+                for m in reversed(historial_previo):
+                    if m["role"] == "assistant" and not m["content"].startswith("[INTERVENCION_HUMANA]"):
+                        ultima_respuesta_bot = m["content"].strip()
+                        break
+
+                es_eco_del_bot = bool(texto_martin) and texto_martin == ultima_respuesta_bot
+
+                if es_eco_del_bot:
+                    logger.info(f"Eco del propio mensaje de Gian ignorado para {msg.telefono}")
+                    continue
+
+                # Intervención humana real de Martín: registrar Y pausar automáticamente
                 contenido_log = texto_martin if texto_martin else "Se envió un archivo"
                 await guardar_mensaje(msg.telefono, "assistant", f"[INTERVENCION_HUMANA] {contenido_log}")
-                logger.info(f"Intervención humana registrada para {msg.telefono}: {contenido_log}")
+                await pausar_contacto(msg.telefono)
+                logger.info(f"Intervención humana registrada y Gian pausado para {msg.telefono}: {contenido_log}")
                 continue
 
             if not msg.texto:
