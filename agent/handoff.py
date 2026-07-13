@@ -72,7 +72,7 @@ async def pausar_contacto(telefono: str):
 
 
 async def activar_timer(telefono: str, tipo: str):
-    """Activa timer desde el CRM. tipo: 'cotizacion' (24hs) o 'visita' (72hs)."""
+    """Activa timer desde el CRM. tipo: 'cotizacion' (72hs) o 'visita' (96hs)."""
     async with async_session() as session:
         result = await session.execute(
             select(HandoffEstado).where(HandoffEstado.telefono == telefono)
@@ -183,9 +183,9 @@ async def scheduler_recordatorios(proveedor):
 
                     tiempo_desde_timer = ahora - estado.timer_activado_en
 
-                    # Cotización → 24hs → 1 solo mensaje → pausa definitiva
+                    # Cotización → 72hs → 1 solo mensaje → pausa definitiva
                     if (estado.tipo_timer == "cotizacion" and
-                            tiempo_desde_timer >= timedelta(hours=24)):
+                            tiempo_desde_timer >= timedelta(hours=72)):
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_COTIZACION)
                         if ok:
                             estado.recordatorio_enviado = "enviado"
@@ -193,9 +193,9 @@ async def scheduler_recordatorios(proveedor):
                             await session.commit()
                             logger.info(f"Recordatorio cotización enviado a {estado.telefono} — pausa definitiva")
 
-                    # Visita → 72hs → 1 solo mensaje → pausa definitiva
+                    # Visita → 96hs → 1 solo mensaje → pausa definitiva
                     elif (estado.tipo_timer == "visita" and
-                            tiempo_desde_timer >= timedelta(hours=72)):
+                            tiempo_desde_timer >= timedelta(hours=96)):
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_VISITA)
                         if ok:
                             estado.recordatorio_enviado = "enviado"
