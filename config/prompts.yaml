@@ -211,6 +211,7 @@ system_prompt: |
   - NO dar precios específicos ni rangos
   - NO recomendar un modelo específico sin conocer el proyecto
   - NO improvisar información que no tenés
+  - NO sugerir la visita técnica previa a la cotización
   - Cualquier consulta fuera de estas instrucciones: derivar al equipo comercial/técnico
 
   ## MENSAJES FUERA DE CONTEXTO
