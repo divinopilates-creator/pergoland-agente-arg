@@ -12,6 +12,14 @@ def extraer_telefono(telefono: str) -> str:
     return telefono.replace("@s.whatsapp.net", "").replace("@c.us", "")
 
 
+def limpiar_tags_cliente(texto: str) -> str:
+    """Quita las etiquetas internas (LEAD, LEAD_MADERA, LLAMADA) antes de mostrarle el mensaje al cliente."""
+    limpio = re.sub(r'\[LEAD:[^\]]+\]', '', texto)
+    limpio = re.sub(r'\[LEAD_MADERA:[^\]]+\]', '', limpio)
+    limpio = re.sub(r'\[LLAMADA:[^\]]+\]', '', limpio)
+    return limpio.strip()
+
+
 def extraer_datos_tag(historial: list) -> dict:
     for msg in reversed(historial):
         if msg["role"] == "assistant":
@@ -42,12 +50,13 @@ def extraer_datos_tag_madera(historial: list) -> dict:
 
 def formatear_historial(historial: list) -> str:
     """Convierte el historial de conversación en texto legible para el CRM."""
-    lineas = ["=== HISTORIAL CONVERSACIÓN CON MATÍAS ===\n"]
+    lineas = ["=== HISTORIAL CONVERSACIÓN CON GIAN ===\n"]
     for msg in historial:
-        rol = "Cliente" if msg["role"] == "user" else "Matías"
+        rol = "Cliente" if msg["role"] == "user" else "Gian"
         # Limpiar tags internos del historial
         contenido = re.sub(r'\[LEAD:[^\]]+\]', '', msg["content"]).strip()
         contenido = re.sub(r'\[LEAD_MADERA:[^\]]+\]', '', contenido).strip()
+        contenido = re.sub(r'\[LLAMADA:[^\]]+\]', '', contenido).strip()
         if contenido:
             lineas.append(f"{rol}: {contenido}")
     return "\n".join(lineas)
@@ -64,7 +73,7 @@ async def enviar_lead_crm(telefono: str, nombre: str, historial: list) -> bool:
     datos = extraer_datos_tag(historial)
 
     nombre_final = datos.get("nombre") or nombre or f"Lead {telefono_limpio}"
-    comuna = datos.get("comuna", "")
+    comuna = datos.get("zona", "")
     medidas = datos.get("medidas", "")
     tipo = datos.get("tipo", "")
     email = datos.get("email", "")
@@ -85,8 +94,10 @@ async def enviar_lead_crm(telefono: str, nombre: str, historial: list) -> bool:
         "name": nombre_final,
         "phone": telefono_limpio,
         "email": email or None,
-        "source": "WhatsApp - Matias",
-        "notes": notas
+        "source": "WhatsApp - Gian",
+        "notes": notas,
+        "comuna": comuna or None,
+        "medidas": medidas or None,
     }
 
     try:

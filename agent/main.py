@@ -11,7 +11,8 @@ from agent.memory import inicializar_db, guardar_mensaje, obtener_historial, obt
 from agent.providers import obtener_proveedor
 from agent.crm import (
     enviar_lead_crm, enviar_lead_distribuidor_crm,
-    extraer_datos_tag_madera, enviar_contacto_incompleto_crm
+    extraer_datos_tag_madera, enviar_contacto_incompleto_crm,
+    limpiar_tags_cliente
 )
 from agent.handoff import (
     inicializar_handoff_db, pausar_contacto, reanudar_contacto,
@@ -203,7 +204,7 @@ async def webhook_handler(request: Request):
             respuesta = await generar_respuesta(texto, historial)
             await guardar_mensaje(msg.telefono, "user", texto)
             await guardar_mensaje(msg.telefono, "assistant", respuesta)
-            await proveedor.enviar_mensaje(msg.telefono, respuesta)
+            await proveedor.enviar_mensaje(msg.telefono, limpiar_tags_cliente(respuesta))
 
             historial_actualizado = await obtener_historial(msg.telefono)
 
