@@ -1,4 +1,4 @@
-# agent/main.py - AgentKit Pergoland Argentina con handoff humano
+# agent/main.py - AgentKit Pergoland Chile con handoff humano
 import os
 import asyncio
 import logging
@@ -11,8 +11,7 @@ from agent.memory import inicializar_db, guardar_mensaje, obtener_historial, obt
 from agent.providers import obtener_proveedor
 from agent.crm import (
     enviar_lead_crm, enviar_lead_distribuidor_crm,
-    extraer_datos_tag_madera, enviar_contacto_incompleto_crm,
-    limpiar_tags_cliente
+    extraer_datos_tag_madera, enviar_contacto_incompleto_crm
 )
 from agent.handoff import (
     inicializar_handoff_db, pausar_contacto, reanudar_contacto,
@@ -32,6 +31,19 @@ proveedor = obtener_proveedor()
 
 # Cache de mensajes procesados para evitar duplicados de Whapi
 mensajes_procesados: set[str] = set()
+
+# Mensajes automáticos de WhatsApp Business (Meta) que llegan como from_me=True
+# pero NO fueron escritos por Gabriel manualmente — no deben pausar a Matías
+MENSAJES_AUTOMATICOS_META = [
+    "Gracias por contactarte con Pergoland Chile",
+    "Gracias por contactarte con Pergoland Argentina",
+]
+
+
+def es_mensaje_automatico_meta(texto: str) -> bool:
+    if not texto:
+        return False
+    return any(texto.strip().startswith(p) for p in MENSAJES_AUTOMATICOS_META)
 
 
 def es_lead_calificado(historial: list) -> bool:
@@ -70,15 +82,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AgentKit - Gian de PERGOLAND ARGENTINA",
-    version="1.5.0",
+    title="AgentKit - Matias de PERGOLAND CHILE SPA",
+    version="1.6.0",
     lifespan=lifespan
 )
 
 
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "service": "agentkit", "agente": "Gian", "negocio": "PERGOLAND ARGENTINA"}
+    return {"status": "ok", "service": "agentkit", "agente": "Matias", "negocio": "PERGOLAND CHILE SPA"}
 
 
 @app.get("/conversations/{telefono}")
@@ -134,27 +146,30 @@ async def webhook_handler(request: Request):
                 mensajes_procesados.add(msg.mensaje_id)
 
             # 1. Mensajes propios (from_me=True) — pueden ser:
-            #    a) Eco del propio mensaje que Gian acaba de enviar (Whapi lo reenvía
-            #       como webhook). Hay que ignorarlo sin pausar nada.
-            #    b) Martín escribiendo manualmente o enviando un archivo. En ese caso
-            #       se registra como intervención humana Y se pausa a Gian
-            #       automáticamente (igual que "stop gian"). Gian solo vuelve a
-            #       responder si alguien manda "start gian" explícitamente.
+            #    a) Eco del propio mensaje que Matías acaba de enviar (Whapi lo
+            #       reenvía como webhook). Hay que ignorarlo sin pausar nada.
+            #    b) Mensaje automático de ausencia/saludo de WhatsApp Business
+            #       (Meta) — tampoco fue escrito por Gabriel, no debe pausar.
+            #    c) Gabriel Varela escribiendo manualmente o enviando un archivo.
+            #       En ese caso se registra como intervención humana Y se pausa
+            #       a Matías automáticamente (igual que "stop matias"). Matías
+            #       solo vuelve a responder si alguien manda "start matias"
+            #       explícitamente.
             if msg.es_propio:
-                texto_martin = msg.texto.strip() if msg.texto else ""
+                texto_humano = msg.texto.strip() if msg.texto else ""
 
-                # "stop gian" / "start gian" escritos por Martín siguen funcionando igual
-                if texto_martin and await es_comando_stop(texto_martin):
+                # "stop matias" / "start matias" siguen funcionando igual
+                if texto_humano and await es_comando_stop(texto_humano):
                     await pausar_contacto(msg.telefono)
-                    logger.info(f"Handoff activado para {msg.telefono} - Gian pausado (orden de Martín)")
+                    logger.info(f"Handoff activado para {msg.telefono} - Matias pausado (orden manual)")
                     continue
-                if texto_martin and await es_comando_start(texto_martin):
+                if texto_humano and await es_comando_start(texto_humano):
                     await reanudar_contacto(msg.telefono)
-                    logger.info(f"Gian reanudado para {msg.telefono} (orden de Martín)")
+                    logger.info(f"Matias reanudado para {msg.telefono} (orden manual)")
                     continue
 
                 # Detectar si es el eco del propio bot: comparamos contra la última
-                # respuesta que Gian generó y guardó para este contacto.
+                # respuesta que Matías generó y guardó para este contacto.
                 historial_previo = await obtener_historial(msg.telefono, limite=5)
                 ultima_respuesta_bot = ""
                 for m in reversed(historial_previo):
@@ -162,17 +177,19 @@ async def webhook_handler(request: Request):
                         ultima_respuesta_bot = m["content"].strip()
                         break
 
-                es_eco_del_bot = bool(texto_martin) and texto_martin == ultima_respuesta_bot
+                es_eco_del_bot = bool(texto_humano) and texto_humano == ultima_respuesta_bot
+                es_auto_meta = es_mensaje_automatico_meta(texto_humano)
 
-                if es_eco_del_bot:
-                    logger.info(f"Eco del propio mensaje de Gian ignorado para {msg.telefono}")
+                if es_eco_del_bot or es_auto_meta:
+                    motivo = "eco del bot" if es_eco_del_bot else "mensaje automático WhatsApp Business"
+                    logger.info(f"Mensaje ignorado ({motivo}) para {msg.telefono}")
                     continue
 
-                # Intervención humana real de Martín: registrar Y pausar automáticamente
-                contenido_log = texto_martin if texto_martin else "Se envió un archivo"
+                # Intervención humana real: registrar Y pausar automáticamente
+                contenido_log = texto_humano if texto_humano else "Se envió un archivo"
                 await guardar_mensaje(msg.telefono, "assistant", f"[INTERVENCION_HUMANA] {contenido_log}")
                 await pausar_contacto(msg.telefono)
-                logger.info(f"Intervención humana registrada y Gian pausado para {msg.telefono}: {contenido_log}")
+                logger.info(f"Intervención humana registrada y Matias pausado para {msg.telefono}: {contenido_log}")
                 continue
 
             if not msg.texto:
@@ -180,21 +197,21 @@ async def webhook_handler(request: Request):
 
             texto = msg.texto.strip()
 
-            # 2. Detectar "stop gian" (del cliente, caso raro pero por si acaso)
+            # 2. Detectar "stop matias" (del cliente, caso raro pero por si acaso)
             if await es_comando_stop(texto):
                 await pausar_contacto(msg.telefono)
-                logger.info(f"Handoff activado para {msg.telefono} - Gian pausado")
+                logger.info(f"Handoff activado para {msg.telefono} - Matias pausado")
                 continue
 
-            # 3. Detectar "start gian"
+            # 3. Detectar "start matias"
             if await es_comando_start(texto):
                 await reanudar_contacto(msg.telefono)
-                logger.info(f"Gian reanudado manualmente para {msg.telefono}")
+                logger.info(f"Matias reanudado manualmente para {msg.telefono}")
                 continue
 
             # 4. Si está pausado — no responder
             if await esta_pausado(msg.telefono):
-                logger.info(f"Mensaje de {msg.telefono} ignorado - Gian pausado")
+                logger.info(f"Mensaje de {msg.telefono} ignorado - Matias pausado")
                 continue
 
             # 5. Flujo normal
@@ -204,7 +221,7 @@ async def webhook_handler(request: Request):
             respuesta = await generar_respuesta(texto, historial)
             await guardar_mensaje(msg.telefono, "user", texto)
             await guardar_mensaje(msg.telefono, "assistant", respuesta)
-            await proveedor.enviar_mensaje(msg.telefono, limpiar_tags_cliente(respuesta))
+            await proveedor.enviar_mensaje(msg.telefono, respuesta)
 
             historial_actualizado = await obtener_historial(msg.telefono)
 
