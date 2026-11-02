@@ -7,24 +7,41 @@ import re
 from datetime import datetime, timedelta
 from sqlalchemy import String, DateTime, Integer, select, delete, text
 from sqlalchemy.orm import Mapped, mapped_column
-from agent.memory import Base, engine, async_session
+from agent.memory import Base, engine, async_session, guardar_mensaje
 
 logger = logging.getLogger("agentkit")
 
 # ── Mensajes automáticos ────────────────────────────────────────────
 MSG_COTIZACION = (
-    "Hola 👋 Soy Gian de Pergoland Argentina. "
+    "Hola, soy Gian de Pergoland Argentina. "
     "Quería saber si pudiste revisar la cotización que te enviamos "
-    "y si tenés alguna consulta sobre tu proyecto. "
-    "¡Estamos para ayudarte! 😊"
+    "y si tenés alguna consulta sobre tu proyecto."
 )
 
 MSG_VISITA = (
-    "Hola 👋 Gian de Pergoland Argentina. "
-    "Quería hacer un seguimiento post visita técnica. "
-    "¿Pudiste revisar la propuesta con Martín? "
-    "¡Cualquier duda estamos acá! 🙌"
+    "Hola, soy Gian de Pergoland Argentina. "
+    "Quería hacer un seguimiento después de la visita técnica. "
+    "¿Pudiste revisar la propuesta con Martín?"
 )
+
+# ── Seguimientos por inactividad (flujo de calificación) ─────────────
+# Horas desde el último mensaje real del cliente -> instrucción para Gian
+SEGUIMIENTOS = [
+    (24, "[SEGUIMIENTO:1]"),
+    (48, "[SEGUIMIENTO:2]"),
+    (72, "[CIERRE_SIN_RESPUESTA]"),
+]
+TOKENS_SISTEMA = ("[SEGUIMIENTO:", "[CIERRE_SIN_RESPUESTA]")
+# Tags que indican que el flujo ya terminó: no se hace seguimiento
+TAGS_FLUJO_TERMINADO = ("[LEAD:", "[LLAMADA:", "[LEAD_MADERA:")
+
+
+async def _guardar_si_no_esta(telefono: str, texto: str):
+    """Guarda el recordatorio en el historial (una sola vez) para reconocer su eco."""
+    from agent.memory import obtener_historial
+    ultimos = await obtener_historial(telefono, limite=1)
+    if not ultimos or ultimos[-1]["content"] != texto:
+        await guardar_mensaje(telefono, "assistant", texto)
 
 
 # ── Modelo de base de datos ──────────────────────────────────────────
@@ -186,6 +203,7 @@ async def scheduler_recordatorios(proveedor):
                     # Cotización → 72hs → 1 solo mensaje → pausa definitiva
                     if (estado.tipo_timer == "cotizacion" and
                             tiempo_desde_timer >= timedelta(hours=72)):
+                        await _guardar_si_no_esta(estado.telefono, MSG_COTIZACION)
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_COTIZACION)
                         if ok:
                             estado.recordatorio_enviado = "enviado"
@@ -196,6 +214,7 @@ async def scheduler_recordatorios(proveedor):
                     # Visita → 96hs → 1 solo mensaje → pausa definitiva
                     elif (estado.tipo_timer == "visita" and
                             tiempo_desde_timer >= timedelta(hours=96)):
+                        await _guardar_si_no_esta(estado.telefono, MSG_VISITA)
                         ok = await proveedor.enviar_mensaje(estado.telefono, MSG_VISITA)
                         if ok:
                             estado.recordatorio_enviado = "enviado"
@@ -205,3 +224,73 @@ async def scheduler_recordatorios(proveedor):
 
         except Exception as e:
             logger.error(f"Error en scheduler recordatorios: {e}")
+
+        try:
+            await procesar_seguimientos(proveedor)
+        except Exception as e:
+            logger.error(f"Error en scheduler seguimientos: {e}")
+
+
+async def procesar_seguimientos(proveedor):
+    """
+    Seguimientos cuando el cliente deja de responder a mitad del flujo.
+    Solo si: Gian no está pausado, el cliente respondió al menos una vez,
+    el último mensaje es de Gian y el flujo no terminó (sin LEAD/LLAMADA/LEAD_MADERA).
+    24h -> [SEGUIMIENTO:1], 48h -> [SEGUIMIENTO:2], 72h -> [CIERRE_SIN_RESPUESTA]
+    (este último NO envía nada al cliente: manda el lead al CRM y pausa).
+    """
+    from agent.memory import listar_chats_con_actividad, obtener_historial_con_fechas
+    from agent.brain import generar_respuesta, obtener_mensaje_error
+    from agent.crm import enviar_lead_crm
+    from agent.flujo import despachar_respuesta
+
+    ahora = datetime.utcnow()
+    for telefono in await listar_chats_con_actividad(ahora - timedelta(days=5)):
+        if await esta_pausado(telefono):
+            continue
+
+        hist = await obtener_historial_con_fechas(telefono)
+        if not hist or hist[-1]["role"] != "assistant":
+            continue
+        if any(m["role"] == "assistant" and any(t in m["content"] for t in TAGS_FLUJO_TERMINADO)
+               for m in hist):
+            continue
+
+        # Último mensaje real del cliente (no cuentan los tokens del sistema)
+        idx = None
+        for i in range(len(hist) - 1, -1, -1):
+            m = hist[i]
+            if m["role"] == "user" and not m["content"].startswith(TOKENS_SISTEMA):
+                idx = i
+                break
+        if idx is None:
+            continue  # el cliente nunca respondió (ej. solo está el mensaje de GHL)
+
+        enviados = sum(
+            1 for m in hist[idx + 1:]
+            if m["role"] == "user" and m["content"].startswith(TOKENS_SISTEMA)
+        )
+        if enviados >= len(SEGUIMIENTOS):
+            continue
+        horas_req, token = SEGUIMIENTOS[enviados]
+        if ahora - hist[idx]["timestamp"] < timedelta(hours=horas_req):
+            continue
+
+        historial = [{"role": m["role"], "content": m["content"]} for m in hist[-20:]]
+        respuesta = await generar_respuesta(token, historial)
+        if respuesta == obtener_mensaje_error():
+            continue  # falla de la API: se reintenta en la próxima vuelta
+
+        await guardar_mensaje(telefono, "user", token)
+        await guardar_mensaje(telefono, "assistant", respuesta)
+
+        if token == "[CIERRE_SIN_RESPUESTA]":
+            # Nunca se envía nada al cliente en este paso
+            from agent.memory import obtener_historial
+            if "[LEAD:" in respuesta:
+                await enviar_lead_crm(telefono, "", await obtener_historial(telefono, limite=60))
+            await pausar_contacto(telefono)
+            logger.info(f"Cierre sin respuesta para {telefono} - lead al CRM y Gian pausado")
+        else:
+            await despachar_respuesta(proveedor, telefono, "", respuesta, avisar_incompleto=False)
+            logger.info(f"{token} enviado a {telefono}")

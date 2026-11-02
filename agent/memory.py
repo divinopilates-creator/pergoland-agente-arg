@@ -98,6 +98,32 @@ async def obtener_historial_completo(telefono: str) -> list[dict]:
             for msg in mensajes
         ]
 
+async def obtener_historial_con_fechas(telefono: str, limite: int = 40) -> list[dict]:
+    """Últimos N mensajes de un chat, en orden cronológico, con timestamp (datetime UTC)."""
+    async with async_session() as session:
+        query = (
+            select(Mensaje)
+            .where(Mensaje.telefono == telefono)
+            .order_by(Mensaje.timestamp.desc())
+            .limit(limite)
+        )
+        result = await session.execute(query)
+        mensajes = list(result.scalars().all())
+        mensajes.reverse()
+        return [
+            {"role": m.role, "content": m.content, "timestamp": m.timestamp}
+            for m in mensajes
+        ]
+
+
+async def listar_chats_con_actividad(desde: datetime) -> list[str]:
+    """Teléfonos con al menos un mensaje desde la fecha indicada (UTC)."""
+    async with async_session() as session:
+        query = select(Mensaje.telefono).where(Mensaje.timestamp >= desde).distinct()
+        result = await session.execute(query)
+        return [fila[0] for fila in result.all()]
+
+
 async def limpiar_historial(telefono: str):
     """Borra todo el historial de una conversación."""
     async with async_session() as session:

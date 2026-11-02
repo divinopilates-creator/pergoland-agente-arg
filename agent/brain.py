@@ -32,13 +32,13 @@ def cargar_system_prompt() -> str:
 def obtener_mensaje_error() -> str:
     """Retorna el mensaje de error configurado en prompts.yaml."""
     config = cargar_config_prompts()
-    return config.get("error_message", "Lo siento, estoy teniendo problemas técnicos. Por favor intentá de nuevo en unos minutos.")
+    return config.get("error_message", "Disculpá, estoy teniendo un problema técnico. Por favor intentá de nuevo en unos minutos.")
 
 
 def obtener_mensaje_fallback() -> str:
     """Retorna el mensaje de fallback configurado en prompts.yaml."""
     config = cargar_config_prompts()
-    return config.get("fallback_message", "Disculpa, no entendí bien tu mensaje. ¿Podrías contarme un poco más sobre lo que buscás? 😊")
+    return config.get("fallback_message", "Disculpá, no entendí bien tu mensaje. ¿Podés contarme un poco más?")
 
 
 async def generar_respuesta(mensaje: str, historial: list[dict]) -> str:
