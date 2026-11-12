@@ -21,7 +21,7 @@ MSG_COTIZACION = (
 MSG_VISITA = (
     "Hola, soy Gian de Pergoland Argentina. "
     "Quería hacer un seguimiento después de la visita técnica. "
-    "¿Pudiste revisar la propuesta con Martín?"
+    "¿Pudiste revisar la propuesta con el equipo técnico?"
 )
 
 # ── Seguimientos por inactividad (flujo de calificación) ─────────────
